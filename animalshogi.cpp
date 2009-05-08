@@ -22,7 +22,7 @@ struct pos_comparer {
   }
 };
 typedef std::set<pos, pos_comparer> pos_set;
-
+typedef std::map<pos, int, pos_comparer> pos_map;
 
 
 class hiyoko {
@@ -58,7 +58,11 @@ public:
   void set(int t, int x, int y) {
     v_ = (t << 5) + (x << 2) + y;
   }
+  void move(pos new_pos) {
+    v_ = (v_ & 0xf0) + (new_pos.x << 2) + new_pos.y;
+  }
 
+  koma_v value() { return v_; }
   bool const reversible() { return movetype::reverse()!=0; }
   bool const ownturn(int turn) {
     if (turn==0)  return (v_ & 32)==0;
@@ -147,6 +151,7 @@ union stage {
   koma<giraffe>  k7;
   koma<lion>     k8;
   };
+  koma_v data[8];
   long long value;
 
   void initialize() {
@@ -162,14 +167,14 @@ union stage {
 
   template <class func_class>
   void each( func_class& c ){
-    c(k1);
-    c(k2);
-    c(k3);
-    c(k4);
-    c(k5);
-    c(k6);
-    c(k7);
-    c(k8);
+    c(*this, k1, 0);
+    c(*this, k2, 1);
+    c(*this, k3, 2);
+    c(*this, k4, 3);
+    c(*this, k5, 4);
+    c(*this, k6, 5);
+    c(*this, k7, 6);
+    c(*this, k8, 7);
   }
 };
 struct stage_comparer {
@@ -178,6 +183,73 @@ struct stage_comparer {
   }
 };
 typedef std::set<stage, stage_comparer> stage_set;
+typedef std::vector<stage> stage_vector;
+
+
+
+
+class stage_condition {
+  int turn_;
+  pos_set rival_suji;
+  pos_map map_;
+public:
+  stage_condition(int turn) : turn_(turn) {}
+  pos_set& kikisuji() { return rival_suji; }
+  pos_map& map() { return map_; }
+
+  template <class movetype>
+  void operator()(const stage& now_stage, koma<movetype>& x, int index) {
+    map_[x.position()] = index;
+    if (!x.ownturn(turn_)) x.kikisuji(rival_suji);
+  }
+};
+
+class walk_step {
+  int turn_;
+  stage_vector::iterator& it_;
+  stage_condition &cond_;
+public:
+  walk_step(stage_vector::iterator& it, stage_condition &cond, int turn) : turn_(turn), cond_(cond), it_(it) {}
+
+  template <class movetype>
+  void operator()(const stage& now_stage, koma<movetype>& x, int index) {
+    if (x.ownturn(turn_)) {
+      pos_set suji;
+      x.kikisuji(suji);
+
+      pos_set::const_iterator it;
+      for(it = suji.begin();it != suji.end();++it) {
+        koma<movetype> new_x = x;
+        new_x.move(*it);
+
+        pos p = new_x.position();
+        //std::cout << (int)p.x << ", " << (int)p.y << " : " << cond_.map().count(p) << std::endl;
+        if (cond_.map().count(p) == 0) { // || (now_stage.data[cond_.map()[p]] != index) {
+          stage new_stage = now_stage;
+          new_stage.data[index] = new_x.value();
+          *it_++ = new_stage;
+        }
+      }
+    }
+  }
+};
+
+void next_step( stage_vector::iterator& prev, stage_vector::iterator& post, int turn) {
+  stage_vector::iterator prev_end = post;
+  while (prev != prev_end) {
+    stage x = *prev;
+    stage_condition cond(turn);
+    x.each(cond);
+
+    walk_step walk(post, cond, turn);
+    x.each(walk);
+
+    ++prev;
+  }
+}
+
+
+
 
 
 class put_stage_char {
@@ -189,7 +261,7 @@ public:
   }
   std::string& sente() { return m1; }
   std::string& go_te() { return m2; }
-  std::string stage() {
+  std::string display() {
     std::string s(buf, buf+4);
     s.push_back(0x0a);
     s.append(buf+4, buf+8);
@@ -199,7 +271,7 @@ public:
   }
 
   template <class movetype>
-  void operator()(koma<movetype>& x) {
+  void operator()(const stage& now_stage, koma<movetype>& x, int index) {
     x.put_stage_char(buf, m1, m2);
   }
 };
@@ -207,57 +279,30 @@ public:
 void print_stage(stage& x) {
   put_stage_char mochigoma;
   x.each(mochigoma);
-  std::cout << mochigoma.stage() << std::endl;
+  std::cout << mochigoma.display() << std::endl;
   std::cout << "[" << mochigoma.go_te() << "] [" << mochigoma.sente() << "]" << std::endl;
   
 }
 
-class make_rival_suji {
-  int turn_;
-  pos_set rival_suji;
-public:
-  make_rival_suji(int turn) : turn_(turn) {}
-  pos_set& kikisuji() { return rival_suji; }
-  
-  template <class movetype>
-  void operator()(koma<movetype>& x) {
-    if (!x.ownturn(turn_)) x.kikisuji(rival_suji);
-  }
-};
 
-void next_step( std::vector<stage>::iterator& prev, std::vector<stage>::iterator& post, int turn) {
-  std::vector<stage>::iterator prev_end = post;
-  while (prev != prev_end) {
-    stage x = *prev;
-    make_rival_suji rival(turn);
-    x.each(rival);
 
-    pos_set::const_iterator it;
-    for(it = rival.kikisuji().begin();it != rival.kikisuji().end();++it) {
-      std::cout << (int)it->x << ", " << (int)it->y << std::endl;
-    }
-
-    *post++ = x;
-    ++prev;
-  }
-}
 
 int main(int argc, char *argv[]) {
   assert(sizeof(stage)==8);
   stage initial;
   initial.initialize();
 
-  std::vector<stage> buffer;
+  stage_vector buffer;
   buffer.resize(BUFFER_SIZE);
 
   print_stage(initial);
 
-  std::vector<stage>::iterator prev = buffer.begin();
-  std::vector<stage>::iterator post = buffer.begin();
+  stage_vector::iterator prev = buffer.begin();
+  stage_vector::iterator post = buffer.begin();
   *post++ = initial;
 
   next_step(prev, post, 0);
-  for(std::vector<stage>::iterator it=prev;it!=post;++it) {
+  for(stage_vector::iterator it=prev;it!=post;++it) {
     print_stage(*it);
   }
 
