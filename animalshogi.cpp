@@ -1,7 +1,7 @@
 #include <iostream>
 #include <cassert>
 #include <map>
-#include <list>
+#include <set>
 #include <vector>
 #include <string>
 
@@ -9,10 +9,21 @@
 
 typedef char koma_v;
 
-struct pos {
-  koma_v x;
-  koma_v y;
+union pos {
+  struct {
+    koma_v x;
+    koma_v y;
+  };
+  short value;
 };
+struct pos_comparer {
+  bool operator()(const pos& x, const pos& y) const {
+    return x.value < y.value;
+  }
+};
+typedef std::set<pos, pos_comparer> pos_set;
+
+
 
 class hiyoko {
 public:
@@ -57,7 +68,7 @@ public:
     pos x = { (v_ >> 2) & 3, v_ & 3 };
     return x;
   }
-  void kikisuji(std::list<pos>& result) {
+  void kikisuji(pos_set& result) {
     koma_v x = (v_ >> 2) & 3;
     koma_v y = v_ & 3;
     int yy;
@@ -77,35 +88,35 @@ public:
 
     if ((suji & 0x80)!=0 && x > 0 && upward) {
       pos p = { x - 1, y - yy };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x40)!=0 && upward) {
       pos p = { x, y - yy };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x20)!=0 && x < 2 && upward) {
       pos p = { x + 1, y - yy };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x10)!=0 && x > 0 ) {
       pos p = { x - 1, y };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x08)!=0 && x < 2 ) {
       pos p = { x + 1, y };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x04)!=0 && x > 0 && downward) {
       pos p = { x - 1, y + yy };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x02)!=0 && downward) {
       pos p = { x , y + yy };
-      result.push_back( p );
+      result.insert( p );
     }
     if ((suji & 0x01)!=0 && x < 2 && downward) {
       pos p = { x + 1, y + yy };
-      result.push_back( p );
+      result.insert( p );
     }
   }
   void put_stage_char(char *buf, std::string &m1, std::string &m2) {
@@ -125,7 +136,8 @@ public:
   }
 };
 
-class stage {
+union stage {
+  struct {
   koma<hiyoko>   k1;
   koma<elephant> k2;
   koma<giraffe>  k3;
@@ -134,7 +146,9 @@ class stage {
   koma<elephant> k6;
   koma<giraffe>  k7;
   koma<lion>     k8;
-public:
+  };
+  long long value;
+
   void initialize() {
     k1.set(0, 1, 2);
     k2.set(0, 0, 3);
@@ -158,6 +172,13 @@ public:
     c(k8);
   }
 };
+struct stage_comparer {
+  bool operator()(const stage& x, const stage& y) const {
+    return x.value < y.value;
+  }
+};
+typedef std::set<stage, stage_comparer> stage_set;
+
 
 class put_stage_char {
   char buf[12];
@@ -193,10 +214,10 @@ void print_stage(stage& x) {
 
 class make_rival_suji {
   int turn_;
-  std::list<pos> rival_suji;
+  pos_set rival_suji;
 public:
   make_rival_suji(int turn) : turn_(turn) {}
-  std::list<pos>& kikisuji() { return rival_suji; }
+  pos_set& kikisuji() { return rival_suji; }
   
   template <class movetype>
   void operator()(koma<movetype>& x) {
@@ -210,12 +231,13 @@ void next_step( std::vector<stage>::iterator& prev, std::vector<stage>::iterator
     stage x = *prev;
     make_rival_suji rival(turn);
     x.each(rival);
-/*
-    std::list<pos>::const_iterator it;
+
+    pos_set::const_iterator it;
     for(it = rival.kikisuji().begin();it != rival.kikisuji().end();++it) {
       std::cout << (int)it->x << ", " << (int)it->y << std::endl;
     }
-*/
+
+    *post++ = x;
     ++prev;
   }
 }
@@ -235,6 +257,8 @@ int main(int argc, char *argv[]) {
   *post++ = initial;
 
   next_step(prev, post, 0);
-
+  for(std::vector<stage>::iterator it=prev;it!=post;++it) {
+    print_stage(*it);
+  }
 
 }
